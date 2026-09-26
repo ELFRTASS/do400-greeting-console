@@ -31,6 +31,7 @@ pipeline{
                   curl -sL https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz \
                     | tar xz -C $HOME/bin oc
                   $HOME/bin/oc version --client
+                  export PATH=$HOME/bin:$PATH
                 '''
             }
         }
@@ -39,8 +40,10 @@ pipeline{
         stage("Release"){
             steps{
                 sh '''
+                    export PATH=$HOME/bin:$PATH
                     oc project igalrq-jenkins 
-                    oc start-build greeting-console --follow --wait'''
+                    oc start-build greeting-console --follow --wait
+                    '''
             }
         }
     }
