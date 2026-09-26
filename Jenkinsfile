@@ -25,5 +25,12 @@ pipeline{
         }
 
         // Add the Release stage here
+        stage("Release"){
+            steps{
+                sh '''
+                    oc project igalrq-jenkins 
+                    oc start-build greeting-console --follow --wait'''
+            }
+        }
     }
 }
