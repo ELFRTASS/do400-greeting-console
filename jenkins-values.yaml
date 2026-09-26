@@ -1,0 +1,138 @@
+# Helm values for the official Jenkins chart (https://charts.jenkins.io)
+# Tuned for OpenShift 4.x (restricted-v2 SCC: random UID, no fixed fsGroup)
+
+controller:
+  image:
+    repository: jenkins/jenkins
+    tag: lts-jdk17
+
+  admin:
+    username: admin
+    # Leave empty to let the chart generate one (stored in secret "jenkins")
+    password: ""
+
+  # --- OpenShift: let the SCC assign UID / fsGroup instead of 1000 ---
+  podSecurityContextOverride:
+    runAsNonRoot: true
+  containerSecurityContext:
+    runAsUser: null
+    runAsGroup: null
+  # OpenShift runs with a random UID that has no home dir -> HOME=/ (read-only).
+  # Point HOME / plugin cache to the writable Jenkins volume.
+  initContainerEnv:
+    - name: HOME
+      value: /var/jenkins_home
+    - name: CACHE_DIR
+      value: /var/jenkins_home/.cache/jenkins-plugin-management-cli
+  containerEnv:
+    - name: HOME
+      value: /var/jenkins_home
+
+  resources:
+    requests: { cpu: "250m", memory: "1Gi" }
+    limits:   { cpu: "1",    memory: "2Gi" }   # sized for Developer Sandbox quota
+
+  # Public URL of Jenkins = the OpenShift Route (update after deploy)
+  jenkinsUrl: ""   # set automatically by deploy-jenkins.sh
+
+  # false = do NOT download plugins at startup, reuse the ones already on the Jenkins volume
+  #         (fast restart, works even when updates.jenkins.io is down).
+  # true  = download them (REQUIRED for the very first install on a new cluster / empty volume).
+
+  # Plugins on top of the chart defaults (kubernetes, workflow-aggregator, git, configuration-as-code)
+  additionalPlugins:
+    - pipeline-stage-view
+    - pipeline-graph-view      # modern visual pipeline view (parallel + matrix graph)
+    - openshift-client
+
+  serviceType: ClusterIP
+
+persistence:
+  enabled: true
+  size: 8Gi              # must be >= the existing volume (cannot shrink a PVC)
+  # storageClass: gp3-csi     # uncomment to force a storage class
+
+# --- Dynamic agents: each Jenkins node = a pod in the cluster ---
+agent:
+  enabled: true              # creates the "kubernetes" cloud in Jenkins
+  namespace: null            # null = same namespace as Jenkins
+  podRetention: Never        # delete the pod after the build
+  idleMinutes: 0
+  containerCap: 2            # max agent pods at the same time (Sandbox quota)
+  resources:
+    requests: { cpu: "100m", memory: "256Mi" }
+    limits:   { cpu: "500m", memory: "512Mi" }
+  runAsUser: null
+  runAsGroup: null
+  # OpenShift fix: /home/jenkins is not accessible with the random UID -> use /tmp/agent
+  workingDir: "/tmp/agent"
+  envVars:
+    - name: HOME
+      value: /tmp/agent
+
+  # Extra pod templates: a job using  node('nodejs') / agent { label 'nodejs' }  gets this pod.
+  # The whole pod is given as raw YAML (same as the inline podTemplate that works on OpenShift):
+  # every container, jnlp included, uses /tmp/agent as working dir and HOME.
+  podTemplates:
+    nodejs: |
+      - name: nodejs
+        label: nodejs
+        idleMinutes: 0
+        yaml: |-
+          apiVersion: v1
+          kind: Pod
+          spec:
+            containers:
+              - name: jnlp
+                image: jenkins/inbound-agent:latest-jdk17
+                workingDir: /tmp/agent
+                env:
+                  - { name: HOME, value: /tmp/agent }
+                resources:
+                  requests: { cpu: 100m, memory: 256Mi }
+                  limits:   { cpu: 500m, memory: 512Mi }
+              - name: nodejs
+                image: node:20
+                command: ["sleep"]
+                args: ["infinity"]
+                workingDir: /tmp/agent
+                env:
+                  - { name: HOME, value: /tmp/agent }
+                resources:
+                  requests: { cpu: 100m, memory: 256Mi }
+                  limits:   { cpu: 1, memory: 1Gi }
+    maven: |
+      - name: maven
+        label: maven
+        idleMinutes: 0
+        yaml: |-
+          apiVersion: v1
+          kind: Pod
+          spec:
+            containers:
+              - name: jnlp
+                image: jenkins/inbound-agent:latest-jdk17
+                workingDir: /tmp/agent
+                env:
+                  - { name: HOME, value: /tmp/agent }
+                resources:
+                  requests: { cpu: 100m, memory: 256Mi }
+                  limits:   { cpu: 500m, memory: 512Mi }
+              - name: maven
+                image: maven:3.9-eclipse-temurin-17
+                command: ["sleep"]
+                args: ["infinity"]
+                workingDir: /tmp/agent
+                env:
+                  - { name: HOME, value: /tmp/agent }
+                  - { name: MAVEN_OPTS, value: "-Duser.home=/tmp/agent" }
+                resources:
+                  requests: { cpu: 250m, memory: 512Mi }
+                  limits:   { cpu: 1, memory: 1Gi }
+
+# ServiceAccount + Role so Jenkins can create/delete agent pods
+serviceAccount:
+  create: true
+  name: null        # null = same name as the Helm release (jenkins here)
+rbac:
+  create: true

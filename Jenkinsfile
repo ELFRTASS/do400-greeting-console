@@ -1,6 +1,9 @@
 pipeline{
-    agent{
-        label "nodejs"
+    agent {
+        kubernetes {
+            inheritFrom 'nodejs'
+            defaultContainer 'nodejs'
+        }
     }
     stages{
         stage("Install dependencies"){
