@@ -41,7 +41,8 @@ pipeline{
             steps{
                 sh '''
                     export PATH=$HOME/bin:$PATH
-                    oc project greeting-console 
+                    oc whoami
+                    oc project igalrq-jenkins 
                     oc start-build greeting-console --follow --wait
                     '''
             }
